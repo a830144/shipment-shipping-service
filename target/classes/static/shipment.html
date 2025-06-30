@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>SD Shipping Planner with Navigation</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .nav-buttons { margin-bottom: 20px; }
+    .nav-buttons button {
+      margin-right: 10px; padding: 8px 16px; font-size: 14px;
+      cursor: pointer;
+    }
+    .section { display: none; }
+    .active { display: block; }
+    table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+    table, th, td { border: 1px solid black; }
+    th, td { padding: 6px; text-align: left; }
+    .item-box { border: 2px solid #888; padding: 10px; margin-bottom: 20px; background: #f9f9f9; }
+    .item-title { font-weight: bold; font-size: 16px; margin-bottom: 5px; }
+    .highlight { background-color: #e0ffe0; }
+  </style>
+</head>
+<body>
+
+  <h2>📦 SAP SD Shipping Planner</h2>
+
+  <div class="nav-buttons">
+    <button onclick="switchView('addShipping')">➕ Add Shipping</button>
+    <button onclick="switchView('shippingList')">📋 Shipping List</button>
+    <button onclick="switchView('huManagement')">📦 HU Management</button>
+  </div>
+
+  <!-- Section 1: Add Shipping -->
+  <div id="addShipping" class="section active">
+    <h3>Step 1: Enter Delivery Info</h3>
+    <form id="deliveryInfoForm">
+      <label>Delivery Date: <input type="date" id="deliveryDate" required></label><br><br>
+      <label>Ship-To Address: <input type="text" id="deliveryAddress" size="50" required></label><br><br>
+      <label>Contact Person: <input type="text" id="contactPerson" required></label><br><br>
+    </form>
+    <button onclick="startPlanning()">✅ Confirm Info & Start Planning</button>
+
+    <div id="planningSection" class="section" style="margin-top:20px;">
+      <h3>Step 2: Pick & Pack Planning for Order #ORD2001</h3>
+      <p><strong>Customer:</strong> XYZ | <strong>Delivery:</strong> <span id="confirmedDate"></span> | <strong>Address:</strong> <span id="confirmedAddress"></span></p>
+      <p><strong>Contact:</strong> <span id="confirmedContact"></span></p>
+      <div id="itemsContainer"></div>
+    </div>
+
+    <div id="shipmentSummary" class="section" style="margin-top:20px;">
+      <h3>Step 3: 🚚 Shipment Summary</h3>
+      <pre id="shipmentDetails">(No items packed yet)</pre>
+      <button onclick="createShipment()">🚀 Create Shipment</button>
+    </div>
+  </div>
+
+  <!-- Section 2: Shipping List -->
+  <div id="shippingList" class="section">
+    <h3>Shipping Documents</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Shipment ID</th>
+          <th>Order ID</th>
+          <th>Customer</th>
+          <th>Delivery Date</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="shippingListBody"></tbody>
+    </table>
+  </div>
+
+  <!-- Section 3: HU Management -->
+  <div id="huManagement" class="section">
+    <h3>Handling Unit Management</h3>
+    <button onclick="showCreateHUForm()">➕ Create New HU</button>
+
+    <div id="createHUForm" style="display:none; margin-top:10px;">
+      <label>HU ID: <input type="text" id="newHUId"></label>
+      <label>Type: <input type="text" id="newHUType"></label>
+      <button onclick="createHU()">Create</button>
+      <button onclick="hideCreateHUForm()">Cancel</button>
+    </div>
+
+    <table style="margin-top:10px;">
+      <thead>
+        <tr><th>HU ID</th><th>Type</th><th>Status</th><th>Contents (nested HUs)</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="huTableBody"></tbody>
+    </table>
+  </div>
+
+<script>
+  // ======= Navigation logic =======
+  function switchView(viewId) {
+    document.querySelectorAll('.section').forEach(sec => sec.classList.remove('active'));
+    document.getElementById(viewId).classList.add('active');
+
+    if(viewId === 'shippingList') loadShippingList();
+    if(viewId === 'huManagement') renderHUTable();
+  }
+
+  // ======= Fake data for Add Shipping (from previous prototype) =======
+  const orderItems = [
+    { id: 'ITEM1', product: 'Product A', quantity: 15 },
+    { id: 'ITEM2', product: 'Product B', quantity: 10 }
+  ];
+
+  const allSUs = {
+    'ITEM1': [
+      { id: 'SU-A1', qty: 10, location: 'Bin A1' },
+      { id: 'SU-A2', qty: 5, location: 'Bin A2' }
+    ],
+    'ITEM2': [
+      { id: 'SU-B1', qty: 6, location: 'Bin B1' },
+      { id: 'SU-B2', qty: 4, location: 'Bin B2' }
+    ]
+  };
+
+  const allHUs = {
+    'ITEM1': [
+      { id: 'HU-A1', type: 'Small Box', status: 'empty', contents: [] }
+    ],
+    'ITEM2': [
+      { id: 'HU-B1', type: 'Medium Box', status: 'empty', contents: [] },
+      { id: 'HU-B2', type: 'Large Box', status: 'empty', contents: [] }
+    ]
+  };
+
+  // ======= Add Shipping Section =======
+  function startPlanning() {
+    const date = document.getElementById('deliveryDate').value;
+    const address = document.getElementById('deliveryAddress').value.trim();
+    const contact = document.getElementById('contactPerson').value.trim();
+
+    if (!date || !address || !contact) {
+      alert("Please fill out all delivery info.");
+      return;
+    }
+
+    document.getElementById('confirmedDate').textContent = date;
+    document.getElementById('confirmedAddress').textContent = address;
+    document.getElementById('confirmedContact').textContent = contact;
+
+    document.getElementById('planningSection').style.display = 'block';
+    document.getElementById('shipmentSummary').style.display = 'block';
+
+    renderItemSections();
+  }
+
+  function renderItemSections() {
+    const container = document.getElementById('itemsContainer');
+    container.innerHTML = '';
+
+    orderItems.forEach(item => {
+      const div = document.createElement('div');
+      div.className = 'item-box';
+      div.innerHTML = `
+        <div class="item-title">Item ${item.id} - ${item.product} (Qty: ${item.quantity})</div>
+        
+        <h4>Available SUs</h4>
+        <table>
+          <thead>
+            <tr><th>Select</th><th>SU ID</th><th>Qty</th><th>Location</th><th>Pick Qty</th></tr>
+          </thead>
+          <tbody id="su-${item.id}">
+            ${allSUs[item.id].filter(su => !su.assigned).map(su => `
+              <tr>
+                <td><input type="checkbox" data-item="${item.id}" data-su="${su.id}"></td>
+                <td>${su.id}</td>
+                <td>${su.qty}</td>
+                <td>${su.location}</td>
+                <td>
+                  <input type="number" min="1" max="${su.qty}" value="${su.qty}" 
+                         data-pickqty="${su.id}" style="width: 60px;">
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+
+        <h4>Available Boxes (HUs)</h4>
+        <table>
+          <thead>
+            <tr><th>Select</th><th>HU ID</th><th>Type</th><th>Status</th><th>Contents</th></tr>
+          </thead>
+          <tbody id="hu-${item.id}">
+            ${allHUs[item.id].map((hu, idx) => `
+              <tr class="${hu.selected ? 'highlight' : ''}">
+                <td><input type="radio" name="hu-${item.id}" value="${idx}" ${hu.selected ? 'checked' : ''}></td>
+                <td>${hu.id}</td><td>${hu.type}</td><td>${hu.status}</td><td>${hu.contents.map(c => `${c.id} (${c.qty})`).join(', ') || '(empty)'}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+
+        <button onclick="assignSUtoHU('${item.id}')">📦 Add Selected SUs to Selected Box</button>
+      `;
+      container.appendChild(div);
+    });
+  }
+
+  function assignSUtoHU(itemId) {
+    const suChecks = document.querySelectorAll(`input[data-item="${itemId}"]:checked`);
+    const huIndex = document.querySelector(`input[name="hu-${itemId}"]:checked`)?.value;
+    if (!suChecks.length || huIndex === undefined) {
+      alert("Select at least one SU and one box.");
+      return;
+    }
+
+    const hu = allHUs[itemId][huIndex];
+    suChecks.forEach(chk => {
+      const suId = chk.getAttribute('data-su');
+      const su = allSUs[itemId].find(s => s.id === suId);
+      const qtyInput = document.querySelector(`input[data-pickqty="${su.id}"]`);
+      let pickedQty = parseInt(qtyInput.value);
+
+      if (pickedQty > 0 && pickedQty <= su.qty && !su.assigned) {
+        hu.contents.push({ id: su.id, qty: pickedQty });
+        su.assigned = true;
+      } else {
+        alert(`Invalid pick quantity for ${su.id}`);
+      }
+    });
+
+    renderItemSections();
+    updateShipmentDetails();
+  }
+
+  function updateShipmentDetails() {
+    const lines = [];
+    Object.keys(allHUs).forEach(itemId => {
+      allHUs[itemId].forEach(hu => {
+        if (hu.contents.length > 0) {
+          lines.push(`Item ${itemId} - HU ${hu.id}: ${hu.contents.map(c => `${c.id} (${c.qty})`).join(', ')}`);
+        }
+      });
+    });
+    document.getElementById('shipmentDetails').textContent = lines.length ? lines.join('\n') : '(No items packed yet)';
+  }
+
+  function createShipment() {
+    updateShipmentDetails();
+    alert("Shipment Created!\n\n" + document.getElementById('shipmentDetails').textContent);
+    // Disable all inputs after shipment creation
+    document.querySelectorAll('input, button').forEach(el => el.disabled = true);
+  }
+
+  // ======= Shipping List Section (Fake data) =======
+  const fakeShipments = [
+    { id: 'SH1001', orderId: 'ORD2001', customer: 'XYZ', deliveryDate: '2025-07-01', status: 'Planned' },
+    { id: 'SH1002', orderId: 'ORD2002', customer: 'ABC', deliveryDate: '2025-07-05', status: 'Confirmed' },
+    { id: 'SH1003', orderId: 'ORD2003', customer: 'XYZ', deliveryDate: '2025-07-03', status: 'Shipped' }
+  ];
+
+  function loadShippingList() {
+    const tbody = document.getElementById('shippingListBody');
+    tbody.innerHTML = '';
+    fakeShipments.forEach(sh => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${sh.id}</td>
+        <td>${sh.orderId}</td>
+        <td>${sh.customer}</td>
+        <td>${sh.deliveryDate}</td>
+        <td>${sh.status}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  // ======= HU Management Section =======
+  let huList = [
+    { id: 'HU-A1', type: 'Small Box', status: 'empty', contents: [] },
+    { id: 'HU-B1', type: 'Medium Box', status: 'packed', contents: ['HU-A1'] },
+    { id: 'HU-C1', type: 'Pallet', status: 'empty', contents: [] }
+  ];
+
+  function renderHUTable() {
+    const tbody = document.getElementById('huTableBody');
+    tbody.innerHTML = '';
+    huList.forEach((hu, idx) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${hu.id}</td>
+        <td>${hu.type}</td>
+        <td>${hu.status}</td>
+        <td>${hu.contents.length > 0 ? hu.contents.join(', ') : '(empty)'}</td>
+        <td>
+          <button onclick="showNestHUForm(${idx})">Nest HU</button>
+          <button onclick="deleteHU(${idx})">Delete</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function showCreateHUForm() {
+    document.getElementById('createHUForm').style.display = 'block';
+  }
+  function hideCreateHUForm() {
+    document.getElementById('createHUForm').style.display = 'none';
+    document.getElementById('newHUId').value = '';
+    document.getElementById('newHUType').value = '';
+  }
+
+  function createHU() {
+    const id = document.getElementById('newHUId').value.trim();
+    const type = document.getElementById('newHUType').value.trim();
+    if (!id || !type) {
+      alert("Please fill HU ID and Type.");
+      return;
+    }
+    if (huList.find(h => h.id === id)) {
+      alert("HU ID already exists.");
+      return;
+    }
+    huList.push({ id, type, status: 'empty', contents: [] });
+    hideCreateHUForm();
+    renderHUTable();
+  }
+
+  let nestHUIndex = null;
+  function showNestHUForm(parentIdx) {
+    nestHUIndex = parentIdx;
+    const huOptions = huList
+      .map((hu, idx) => idx !== parentIdx ? `<option value="${idx}">${hu.id}</option>` : '')
+      .join('');
+    const formHTML = `
+      <div style="margin-top:10px; border:1px solid #ccc; padding:10px; background:#f7f7f7;">
+        <label>Choose HU to nest inside <strong>${huList[parentIdx].id}</strong>:
+          <select id="nestHUSelect">${huOptions}</select>
+        </label>
+        <button onclick="nestHU()">Nest</button>
+        <button onclick="cancelNest()">Cancel</button>
+      </div>
+    `;
+    const container = document.createElement('div');
+    container.id = 'nestHUFormContainer';
+    container.innerHTML = formHTML;
+    document.getElementById('huManagement').appendChild(container);
+  }
+
+  function nestHU() {
+    const select = document.getElementById('nestHUSelect');
+    const nestIdx = parseInt(select.value);
+    if (nestIdx === nestHUIndex) {
+      alert("Cannot nest HU inside itself.");
+      return;
+    }
+    const parentHU = huList[nestHUIndex];
+    const nestHU = huList[nestIdx];
+
+    // Prevent cyclic nesting
+    if (isNested(nestHU.id, parentHU.id)) {
+      alert("Cannot create cyclic nesting.");
+      return;
+    }
+
+    // Remove nestHU from any other HU contents
+    huList.forEach(hu => {
+      hu.contents = hu.contents.filter(c => c !== nestHU.id);
+    });
+
+    parentHU.contents.push(nestHU.id);
+    parentHU.status = 'packed';
+    nestHU.status = 'nested';
+
+    removeNestHUForm();
+    renderHUTable();
+  }
+
+  function cancelNest() {
+    removeNestHUForm();
+  }
+
+  function removeNestHUForm() {
+    const container = document.getElementById('nestHUFormContainer');
+    if (container) container.remove();
+  }
+
+  // Check if targetId is nested inside currentId (to prevent cycles)
+  function isNested(targetId, currentId) {
+    const currentHU = huList.find(hu => hu.id === currentId);
+    if (!currentHU) return false;
+    if (currentHU.contents.includes(targetId)) return true;
+    return currentHU.contents.some(childId => isNested(targetId, childId));
+  }
+
+  function deleteHU(idx) {
+    if (!confirm(`Delete HU ${huList[idx].id}?`)) return;
+    // Remove from all contents
+    const huId = huList[idx].id;
+    huList.forEach(hu => {
+      hu.contents = hu.contents.filter(c => c !== huId);
+    });
+    huList.splice(idx, 1);
+    renderHUTable();
+  }
+
+  // Init
+  window.onload = () => {
+    // Show addShipping by default
+    switchView('addShipping');
+    document.getElementById('shipmentDetails').textContent = '(No items packed yet)';
+  };
+</script>
+
+</body>
+</html>
